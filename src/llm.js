@@ -70,7 +70,10 @@ hips は腰位置のオフセット(メートル)。不要なら空配列 [] に
 - 手のひらの向き (重要): Tポーズの手のひらは下向きなので、腕を上げただけだと
   手のひらは後ろ/内側を向いてしまう。手を振る・手を見せる動作では前腕をひねって
   手のひらを正面に向けること: lowerArm の X に -60〜-90 を入れる (左右どちらも負)。
-  例: 右手を振る → rightLowerArm r=[-80, 0, -75] のように X と Z を併用する。
+- 上腕を 60 度以上上げた状態で肘を 60 度以上曲げない (前腕が頭に被さって不自然)。
+- 右手を振る形の正解例 (この骨格の使い方を守る。振る速さ・回数・首の演技などは自由):
+  rightUpperArm を [0,0,-50] 前後で維持し、
+  rightLowerArm を [-80,0,-40] ⇔ [-80,0,-75] の間で往復させる (Xのひねりは維持したまま)。
 - 挨拶や合図など腕を上げる動作全般: 手の高さは頭の高さまでで十分。
   それ以上は「上腕を上げる」のではなく「肘の曲げ」で調整する。
 - 拍手: 両腕を体の前で構え (upperArm Y ±50〜60 前後 + 少し下げ)、
@@ -134,7 +137,8 @@ export const REFINE_INSTRUCTION = `以下は上記の指示で生成されたモ
 チェック観点:
 1. 可動域: 各関節がルールの範囲内か。腕が真上 (±90度) を超えていないか。
    手を振る系の動作で「解剖学メモ」の形 (上腕45〜60度 + 肘曲げ + 前腕の往復) になっているか。
-2. 軌道: 腕や脚が体・頭と交差していないか。左右の取り違えがないか。
+2. 軌道: 腕や脚が体・頭と交差していないか。前腕が頭の上に被さっていないか
+   (上腕60度以上 + 肘60度以上の組み合わせは禁止)。左右の取り違えがないか。
 3. 自然さ: 肘が伸びきっていないか。往復運動の端で減速しているか。予備動作と余韻があるか。
 4. 完全性: 使うボーンに t=0 と t=duration のキーがあるか。非ループは最初と最後がニュートラルか。
 5. 意図: そもそもユーザーの指示した動きになっているか。
@@ -143,7 +147,7 @@ export const REFINE_INSTRUCTION = `以下は上記の指示で生成されたモ
 // ボーン別の安全な角度上限 (度)。LLM出力の暴れをクランプする
 const ANGLE_LIMITS = {
   leftHand: 25, rightHand: 25,
-  leftUpperArm: 85, rightUpperArm: 85,
+  leftUpperArm: 75, rightUpperArm: 75,
   neck: 45, head: 70,
   spine: 45, chest: 45, upperChest: 45,
   leftFoot: 60, rightFoot: 60,
@@ -302,6 +306,21 @@ function validateSpec(spec) {
   }
   if (Object.keys(spec.tracks).length === 0 && !spec.hips?.length) {
     throw new Error('生成されたモーションに有効なトラックがありません');
+  }
+  // 前腕が頭に被さる構図の防止: 肘を深く曲げる腕は、上腕の上げを 58 度までに自動補正
+  for (const side of ['left', 'right']) {
+    const ua = spec.tracks[`${side}UpperArm`];
+    const la = spec.tracks[`${side}LowerArm`];
+    if (!ua?.length || !la?.length) continue;
+    const raiseSign = side === 'left' ? 1 : -1;
+    const maxBend = Math.max(
+      ...la.map((k) => Math.max(Math.abs(k.r[1]), Math.abs(k.r[2])))
+    );
+    if (maxBend > 55) {
+      for (const k of ua) {
+        if (raiseSign * k.r[2] > 58) k.r[2] = raiseSign * 58;
+      }
+    }
   }
   if (Array.isArray(spec.hips)) {
     spec.hips = spec.hips.filter(
