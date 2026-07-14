@@ -55,7 +55,11 @@ async function init() {
     } catch { /* 次の候補へ */ }
   }
   vrmName.textContent = 'モデル未読込 — VRMファイルを開いてください。';
-  setStatus('VRMモデルが見つかりません。\n「VRMファイルを開く」から .vrm を読み込んでください。', 'err');
+  setStatus(
+    '「VRMファイルを開く」から手持ちの .vrm を読み込んでください。\n' +
+    '(VRMモデルは VRoid Hub の AvatarSample などから無料で入手できます)',
+    'err'
+  );
 }
 
 // --- モーション再生共通処理 (プレビューは表情込み) ---

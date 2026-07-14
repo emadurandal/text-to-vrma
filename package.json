@@ -18,7 +18,8 @@
     "asar": false,
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "!dist/models/*.vrm"
     ],
     "directories": {
       "output": "release"
