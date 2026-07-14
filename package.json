@@ -1,12 +1,36 @@
 {
   "name": "text-to-vrma",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "app:dev": "electron .",
+    "app:build": "vite build && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.kiratchi.text-to-vrma",
+    "productName": "Text-To-VRMA",
+    "electronDist": "node_modules/electron/dist",
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "Text-To-VRMA-v${version}.exe"
+    }
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.4",
@@ -14,6 +38,8 @@
     "three": "^0.180.0"
   },
   "devDependencies": {
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
     "vite": "^7.3.0"
   }
 }

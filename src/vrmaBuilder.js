@@ -47,7 +47,8 @@ export const BONE_NAMES = Object.keys(SKELETON).filter((n) => !/Proximal|Interme
 const ALL_BONES = Object.keys(SKELETON);
 
 // 自然な手: 指を軽く曲げるデフォルトポーズ (度)
-const FINGER_CURL = { Proximal: 26, Intermediate: 30, Distal: 20 };
+// 腕を上げた姿勢では手のひらが外を向くため、強いカールは「反り返り」に見える。控えめに。
+const FINGER_CURL = { Proximal: 14, Intermediate: 17, Distal: 10 };
 
 const eulerQuat = (() => {
   const e = new THREE.Euler();

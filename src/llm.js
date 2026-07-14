@@ -41,8 +41,8 @@ hips は腰位置のオフセット(メートル)。不要なら空配列 [] に
 - duration は 1.5〜6 秒程度。感情や勢いをテキストから読み取って表現豊かに。
 - 回転角は関節の可動域内に収める。特に:
   - leftHand / rightHand (手首) は動かさない (自然な手のポーズが自動で適用される)。
+  - leftShoulder / rightShoulder (肩) も動かさない (服のメッシュが歪みやすい)。腕の動きは upperArm で作る。
   - 肘 (lowerArm) は1軸中心に曲げる。複数軸を同時に大きく回すと関節が破綻する。
-  - shoulder は ±15 度程度の補助にとどめ、腕の主な動きは upperArm で作る。
   - 首・頭の合計は ±60 度以内。spine/chest はそれぞれ ±30 度以内。
 - 動きの主役となる関節を決め、それ以外は控えめに。全身の関節を同時に大きく動かさない。
 
@@ -125,7 +125,7 @@ export const REFINE_INSTRUCTION = `以下は上記の指示で生成されたモ
 // ボーン別の安全な角度上限 (度)。LLM出力の暴れをクランプする
 const ANGLE_LIMITS = {
   leftHand: 25, rightHand: 25,
-  leftShoulder: 30, rightShoulder: 30,
+  leftShoulder: 8, rightShoulder: 8,
   leftUpperArm: 100, rightUpperArm: 100,
   neck: 45, head: 70,
   spine: 45, chest: 45, upperChest: 45,

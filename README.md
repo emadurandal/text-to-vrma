@@ -39,6 +39,19 @@ npm run dev
      セルフレビューを行い品質を上げます (API呼び出しが2回になります)
 4. 「⬇ .vrma 保存」で生成アニメーションをファイルに書き出し
 
+## デスクトップ版 (exe) のビルド
+
+Booth 等で配布できる Windows ポータブル exe を生成できます:
+
+```sh
+npm run app:build
+# → release/Text-To-VRMA-v<version>.exe (単一ファイル、インストール不要)
+```
+
+- exe に API キーは一切含まれません。利用者が起動後に自分の OpenAI API キーを
+  入力する方式で、キーは利用者の PC 内にのみ保存されます
+- 同梱されるのはビルド済みアプリと AvatarSample モデルのみです
+
 ## アーキテクチャ
 
 ```text
