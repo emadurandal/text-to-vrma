@@ -28,8 +28,11 @@ function setStatus(msg, kind = '') {
 
 // --- ビューア初期化 ---
 const viewer = new Viewer($('canvas'));
-// 起動時は同梱サンプルを読み込む (手持ちモデルは「VRMファイルを開く」で差し替え)
-const DEFAULT_MODEL_URLS = ['/models/SampleBot.vrm'];
+// 起動時の読み込み優先順: VRoidサンプル (VRM0/VRM1) → 自作サンプル
+const DEFAULT_MODEL_URLS = [
+  '/models/AvatarSample_A.vrm',
+  '/models/SampleBot.vrm',
+];
 
 async function init() {
   setStatus('VRMモデルを読み込み中...');

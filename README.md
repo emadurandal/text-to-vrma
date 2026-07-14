@@ -12,8 +12,16 @@
 - Node.js 20+
 - OpenAI API キー ([platform.openai.com](https://platform.openai.com/) で取得)
 
-VRM モデルはサンプル (`public/models/SampleBot.vrm`、本リポジトリ生成の箱ロボット) を
+VRM モデルはサンプル (`public/models/SampleBot.vrm`、本リポジトリ生成のローポリ人間) を
 同梱しているのでそのまま試せます。手持ちの `.vrm` への差し替えも可能です。
+
+`public/models/AvatarSample_A.vrm` に VRoid 公式サンプルモデルを置くと、
+起動時にそちらが優先して読み込まれます
+([VRoid Hub の AvatarSample](https://hub.vroid.com/characters/2843975675147313744/models/5644550979324015604)
+からダウンロード。無償での再配布は許可されていますが、有償再配布と CC0 としての
+配布は禁止されています — モデルは MIT ライセンスの対象外です)。
+
+VRM **0.x / 1.0 の両形式に対応**しています (three-vrm が自動判別し、向きも正規化)。
 
 ## セットアップ & 起動
 

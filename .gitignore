@@ -3,9 +3,11 @@ dist/
 *.local
 
 # サードパーティのVRMモデルは再配布規約があるためコミットしない
-# (SampleBot.vrm は本リポジトリで生成した自作モデルなので同梱)
+# 例外: SampleBot.vrm (本リポジトリ生成の自作モデル)
+#       AvatarSample_A.vrm (VRoid公式サンプル。無償再配布可 — README参照)
 public/models/*.vrm
 !public/models/SampleBot.vrm
+!public/models/AvatarSample_A.vrm
 
 # エディタ / OS
 .vscode/
