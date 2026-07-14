@@ -1,6 +1,6 @@
 # Text-To-VRMA — テキストからVRMアニメーション生成
 
-テキストを入力すると、ChatGPT (OpenAI API) がキーフレームを設計し、
+テキストを入力すると、OpenAI API がキーフレームを設計し、
 **VRMA (VRM Animation / `.vrma`)** ファイルをブラウザ内で生成して、
 その場で VRM キャラクターを動かす Web アプリです。
 生成した `.vrma` はファイルとして保存でき、VRMA 対応アプリでそのまま利用できます。
@@ -42,7 +42,7 @@ npm run dev
 ## アーキテクチャ
 
 ```text
-テキスト ── ChatGPT API ──▶ モーション spec (ボーン別オイラー角キーフレーム JSON)
+テキスト ── OpenAI API ──▶ モーション spec (ボーン別オイラー角キーフレーム JSON)
                                    │
                                    ▼
               vrmaBuilder.js ── glTF + VRMC_vrm_animation 拡張 → GLB (.vrma)
@@ -53,7 +53,7 @@ npm run dev
 
 | ファイル | 役割 |
 | --- | --- |
-| `src/llm.js` | ChatGPT へのプロンプト (ボーン規約・お手本モーション5種) / 2パス自己修正 / spec 検証・角度クランプ |
+| `src/llm.js` | OpenAI API へのプロンプト (ボーン規約・お手本モーション5種) / 2パス自己修正 / spec 検証・角度クランプ |
 | `src/vrmaBuilder.js` | モーション spec から VRMA (GLB) をバイナリ生成。VRM1 規約の T ポーズ骨格を埋め込み、`VRMC_vrm_animation` 拡張でヒューマノイドボーンをマッピング |
 | `src/viewer.js` | three.js シーン / VRM ロード / VRMA 再生 |
 | `src/idleMotion.js` | 待機モーション (呼吸) |
@@ -61,7 +61,7 @@ npm run dev
 
 ## モーション spec フォーマット
 
-ChatGPT が生成する中間表現です:
+LLM が生成する中間表現です:
 
 ```json
 {

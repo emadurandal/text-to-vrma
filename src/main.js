@@ -2,7 +2,7 @@
 import { Viewer } from './viewer.js';
 import { buildVRMA } from './vrmaBuilder.js';
 import { idleSpec } from './idleMotion.js';
-import { generateMotionWithChatGPT, DEFAULT_OPENAI_MODEL } from './llm.js';
+import { generateMotionWithOpenAI, DEFAULT_OPENAI_MODEL } from './llm.js';
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
@@ -167,8 +167,8 @@ generateBtn.addEventListener('click', async () => {
     const model = modelSelect.value;
     localStorage.setItem('openai-model', model);
     localStorage.setItem('refine-enabled', refineCheck.checked ? '1' : '0');
-    setStatus(`ChatGPT (${model}) がモーションを生成中... (数十秒かかることがあります)`);
-    const spec = await generateMotionWithChatGPT(text, apiKey, model, {
+    setStatus(`OpenAI (${model}) がモーションを生成中... (数十秒かかることがあります)`);
+    const spec = await generateMotionWithOpenAI(text, apiKey, model, {
       refine: refineCheck.checked,
       onProgress: (msg) => setStatus(msg),
     });

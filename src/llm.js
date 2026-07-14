@@ -1,4 +1,4 @@
-// llm.js — OpenAI (ChatGPT) API で自由なテキストからモーション spec を生成する (オプション機能)
+// llm.js — OpenAI API でテキストからモーション spec を生成する
 import { BONE_NAMES } from './vrmaBuilder.js';
 
 export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
@@ -158,7 +158,7 @@ async function callOpenAI(messages, apiKey, model) {
 
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('ChatGPT から有効な応答が得られませんでした');
+  if (!content) throw new Error('OpenAI API から有効な応答が得られませんでした');
   return content;
 }
 
@@ -172,7 +172,7 @@ async function callOpenAI(messages, apiKey, model) {
  * @param {(msg: string) => void} [options.onProgress] 進捗表示コールバック
  * @returns {Promise<object>} モーション spec
  */
-export async function generateMotionWithChatGPT(
+export async function generateMotionWithOpenAI(
   text,
   apiKey,
   model = DEFAULT_OPENAI_MODEL,
