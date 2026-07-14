@@ -120,9 +120,9 @@
       <option value="gpt-5.6-terra">gpt-5.6-terra (バランス)</option>
       <option value="gpt-5.6-luna">gpt-5.6-luna (低コスト)</option>
     </select>
-    <label class="check">
+    <label class="check" title="生成後にもう1パス、可動域・軌道・緩急のセルフレビューを行って品質を上げます。時間とAPIコストは約2倍になります。">
       <input type="checkbox" id="refineCheck" checked />
-      🔍 自己修正 (2パス生成 — 精度向上 / 時間・コスト約2倍)
+      🔍 自己修正 (2パス生成で品質向上)
     </label>
     <div class="section-title">3. モーションをテキストで指示</div>
     <textarea id="textInput" placeholder="例: 手を振る&#10;例: 深くお辞儀する&#10;例: うなずく&#10;例: 伸びをする"></textarea>
