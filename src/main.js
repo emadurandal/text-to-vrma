@@ -41,6 +41,13 @@ function setCodexAuthState(message, kind = '') {
   codexAuthState.className = `auth-state${kind ? ` ${kind}` : ''}`;
 }
 
+// スクリーンショットや配信への写り込み対策としてメールアドレスをマスクする
+function maskEmail(email) {
+  if (typeof email !== 'string' || !email.includes('@')) return null;
+  const [user, domain] = email.split('@');
+  return `${user.slice(0, 2)}***@${domain}`;
+}
+
 function renderAuthMode() {
   const codexMode = authModeSelect.value === 'codex' && Boolean(codexBridge);
   apiSettings.classList.toggle('hidden', codexMode);
@@ -72,7 +79,7 @@ async function refreshCodexStatus(providedStatus) {
     if (!codexStatus.available) {
       setCodexAuthState(codexStatus.error || 'Codex CLIを利用できません。', 'err');
     } else if (account?.type === 'chatgpt') {
-      const identity = account.email || 'ChatGPTアカウント';
+      const identity = maskEmail(account.email) || 'ChatGPTアカウント';
       setCodexAuthState(
         `ログイン済み: ${identity}\nプラン: ${account.planType} / CLI: ${codexStatus.version}`,
         'ok'
