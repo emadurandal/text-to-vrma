@@ -17,3 +17,10 @@ Thumbs.db
 
 # デモ動画の原本はコミットしない (README は GIF を使用)
 video/*.mp4
+
+# Claude Code ローカル設定
+.claude/
+
+# Python
+__pycache__/
+*.pyc
