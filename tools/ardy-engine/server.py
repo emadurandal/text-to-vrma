@@ -57,9 +57,13 @@ if ARGS.merged_base:
     lm = importlib.import_module("ardy.model.load_model")
     lm.TEXT_ENCODER_PRESETS["llm2vec"]["kwargs"]["base_model_name_or_path"] = ARGS.merged_base
 
+import numpy as np  # noqa: E402
+from scipy.spatial.transform import Rotation as SciRot  # noqa: E402
+
 from ardy.constraints import Root2DConstraintSet  # noqa: E402
 from ardy.model import load_model  # noqa: E402
 from ardy.postprocess import post_process_motion  # noqa: E402
+from ardy.skeleton.kinematics import fk  # noqa: E402
 from ardy.tools import seed_everything, to_numpy  # noqa: E402
 
 from retarget import spec_from_arrays  # noqa: E402
@@ -177,6 +181,23 @@ def build_waypoint_conditions(waypoints, num_frames):
         min(num_frames - 1, int(t0 + (t1 - t0) * (dists[i + 1] / total)))
         for i in range(len(pts))
     ]
+    # 経路に沿って約1秒間隔の中間制約を追加 (位置は線形補間)。
+    # 経由地の瞬間だけの制約だと、間の区間で後ろ向き・横向き移動の解が
+    # 許されてしまうため、経路全体を密に誘導する
+    dense_pts, dense_frames = [], []
+    all_pts = [(0.0, 0.0)] + pts
+    all_frames = [t0 // 2] + frame_indices
+    for i in range(1, len(all_pts)):
+        f_a, f_b = all_frames[i - 1], all_frames[i]
+        p_a, p_b = all_pts[i - 1], all_pts[i]
+        for f in range(f_a + FPS, f_b, FPS):
+            w = (f - f_a) / max(1, f_b - f_a)
+            dense_pts.append((p_a[0] + (p_b[0] - p_a[0]) * w, p_a[1] + (p_b[1] - p_a[1]) * w))
+            dense_frames.append(f)
+        if not dense_frames or f_b > dense_frames[-1]:
+            dense_pts.append(p_b)
+            dense_frames.append(f_b)
+    pts, frame_indices = dense_pts, dense_frames
     # 最終経由地に「留まる」制約: 終端までルートを同じ位置にピン留めして、
     # モデル自身に減速→停止させる (これがないとテキスト通り歩き続けて
     # 歩行姿勢のままクリップが終わる)
@@ -184,10 +205,21 @@ def build_waypoint_conditions(waypoints, num_frames):
         if f > frame_indices[-1]:
             frame_indices.append(f)
             pts.append(pts[-1])
+    # 向き (heading) の制約: 各経由地で「進行方向を向く」よう指定する。
+    # 位置だけの制約だと後ろ向き・横向きに移動する解も許されてしまう
+    headings = []
+    for i in range(len(pts)):
+        src = (0.0, 0.0) if i == 0 else pts[i - 1]
+        dx, dz = pts[i][0] - src[0], pts[i][1] - src[1]
+        if dx * dx + dz * dz < 1e-8:  # 停止ピンは直前の向きを維持
+            headings.append(headings[-1] if headings else 0.0)
+        else:
+            headings.append(float(np.arctan2(dx, dz)))  # 0 = +Z正面
     constraint = Root2DConstraintSet(
         model.skeleton,
         frame_indices=torch.tensor(frame_indices),
         root_2d=torch.tensor(pts, dtype=torch.float32, device=DEVICE),
+        global_root_heading=torch.tensor(headings, dtype=torch.float32, device=DEVICE),
     )
     lengths = torch.tensor([num_frames], device=DEVICE)
     observed, mask = model.motion_rep.create_conditions_from_constraints_batched(
@@ -206,7 +238,10 @@ def waypoint_duration(waypoints) -> float:
     return max(4.0, min(MAX_DURATION, dist / 1.0 + 3.0))
 
 
-def _generate_motion_streaming(segments: list, steps: int, observed=None, mask=None, on_chunk=None):
+def _generate_motion_streaming(
+    segments: list, steps: int, observed=None, mask=None, on_chunk=None, cfg=2.0,
+    progress_base=0.0, progress_span=1.0,
+):
     """デモと同じチャンク逐次生成。セグメントごとにプロンプトを切り替える。
 
     バッチAPI (model.__call__) は各チャンクで残り全フレームを処理するため
@@ -270,7 +305,7 @@ def _generate_motion_streaming(segments: list, steps: int, observed=None, mask=N
             num_denoising_steps=steps,
             motion_mask=win_mask,
             observed_motion=win_observed,
-            cfg_weight=(2.0, 2.0),
+            cfg_weight=(cfg, 2.0),
             text_feat=text_feat,
             text_pad_mask=text_pad_mask,
             init_history_sequence=hist,
@@ -284,12 +319,100 @@ def _generate_motion_streaming(segments: list, steps: int, observed=None, mask=N
         keep = max(PATCH, (next_bound - pos) // PATCH * PATCH) if next_bound - pos < new.shape[1] else new.shape[1]
         new = new[:, :keep]
         motion = new if motion is None else torch.cat([motion, new], dim=1)
-        PROGRESS["fraction"] = min(0.99, motion.shape[1] / num_frames)
+        PROGRESS["fraction"] = min(0.99, progress_base + progress_span * motion.shape[1] / num_frames)
         if on_chunk is not None:
             end = min(motion.shape[1], num_frames)
             if end > pos:
                 on_chunk(motion[:, pos:end], pos, num_frames)
     return motion[:, :num_frames]
+
+
+def _hips_yaw(rot):
+    """Hipsグローバル回転行列 [3,3] から水平面の向き (yaw, ラジアン) を取り出す。"""
+    fwd = rot @ np.array([0.0, 0.0, 1.0])
+    return float(np.arctan2(fwd[0], fwd[2]))
+
+
+def _roty(angle):
+    c, s = np.cos(angle), np.sin(angle)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+
+def _generate_stitched(segments: list, steps: int, cfg: float):
+    """セグメントごとに独立生成し、位置・向きを揃えて縫い合わせる。
+
+    連続生成 (履歴引き継ぎ) は直前の動きの慣性が勝って新しい動作
+    (ジャンプ等) が発火しないことがある。各セグメントを履歴なしで生成すると
+    単体生成と同じ再現度になるため、終端の位置・向きに次セグメントを整列し、
+    つなぎ目を短いクロスフェード (0.3秒) で滑らかにする。
+
+    Returns:
+        (local_rot_mats [T,J,3,3], root_positions [T,3], foot_contacts [T,...]) — numpy
+    """
+    BLEND = 6  # クロスフェードするフレーム数
+    total = sum(nf for _, nf in segments)
+    done = 0
+    out_local = out_root = out_fc = None
+    for en, nf in segments:
+        PROGRESS["text"] = en
+        motion = _generate_motion_streaming(
+            [(en, nf)], steps, cfg=cfg,
+            progress_base=done / total, progress_span=nf / total,
+        )
+        o = to_numpy(model.motion_rep.inverse(motion, is_normalized=True))
+        local = np.asarray(o["local_rot_mats"])[0]
+        root = np.asarray(o["root_positions"])[0]
+        fc = np.asarray(o["foot_contacts"])[0]
+        if out_local is None:
+            out_local, out_root, out_fc = local.copy(), root.copy(), fc.copy()
+        else:
+            # 前セグメント終端の向き・位置に整列 (Y軸回転 + 平行移動)
+            Ry = _roty(_hips_yaw(out_local[-1, 0]) - _hips_yaw(local[0, 0]))
+            r0 = root[0].copy()
+            r0[1] = 0.0
+            root = (root - r0) @ Ry.T
+            root[:, 0] += out_root[-1, 0]
+            root[:, 2] += out_root[-1, 2]
+            local = local.copy()
+            local[:, 0] = np.einsum("ab,tbc->tac", Ry, local[:, 0])
+            # つなぎ目のクロスフェード: 前終端ポーズから新セグメントへ滑らかに移行
+            B = min(BLEND, local.shape[0] - 1)
+            q_prev = SciRot.from_matrix(out_local[-1]).as_quat()  # [J,4]
+            for i in range(B):
+                w = (i + 1) / (B + 1)
+                q_i = SciRot.from_matrix(local[i]).as_quat()
+                dot = np.sum(q_i * q_prev, axis=1, keepdims=True)
+                q_p = np.where(dot < 0, -q_prev, q_prev)
+                q = (1 - w) * q_p + w * q_i
+                q /= np.linalg.norm(q, axis=1, keepdims=True)
+                local[i] = SciRot.from_quat(q).as_matrix()
+                root[i, 1] = (1 - w) * out_root[-1, 1] + w * root[i, 1]
+            out_local = np.concatenate([out_local, local])
+            out_root = np.concatenate([out_root, root])
+            out_fc = np.concatenate([out_fc, fc])
+        done += nf
+    return out_local, out_root, out_fc
+
+
+# 「〜してから」等の日本語接続表現。GPTなしでもセグメント分割できるようにする
+JP_SEQUENCE_RE = re.compile(r"てから|それから|そのあと|その後|、そして|。そして|、次に|。次に")
+
+
+def _split_japanese_sequence(text: str):
+    """日本語の連続動作表現を分割する。分割できなければ [text] を返す。"""
+    parts = []
+    rest = text
+    while True:
+        m = JP_SEQUENCE_RE.search(rest)
+        if not m:
+            break
+        head = rest[: m.end()].rstrip("、。 ")
+        if head:
+            parts.append(head)
+        rest = rest[m.end():].lstrip("、。 ")
+    if rest.strip():
+        parts.append(rest.strip())
+    return parts if len(parts) > 1 else [text]
 
 
 def _resolve_segments(text, duration, segments_req):
@@ -315,6 +438,10 @@ def _resolve_segments(text, duration, segments_req):
             segments = [(en, max(PATCH, int(nf * ratio) // PATCH * PATCH)) for en, nf in segments]
         name = " / ".join(en for en, _ in segments)
         return segments, name, None
+    # GPT計画なしでも「〜してから」等の連続動作はセグメント分割する
+    parts = _split_japanese_sequence(text.strip())
+    if len(parts) > 1 and duration is None:
+        return _resolve_segments(text, None, [{"text": p} for p in parts])
     english, original = maybe_translate(text.strip())
     if duration is None:
         duration = estimate_duration(english, original)
@@ -326,11 +453,13 @@ def _resolve_segments(text, duration, segments_req):
 
 def generate_spec(
     text: str, duration=None, seed=None, steps=None, arm_spread=None, segments_req=None,
-    postprocess=True, waypoints=None, on_chunk=None,
+    postprocess=True, waypoints=None, on_chunk=None, cfg=None,
 ) -> dict:
     arm_spread = ARGS.arm_spread if arm_spread is None else max(0.0, min(20.0, float(arm_spread)))
     steps = int(steps) if steps else NUM_BASE_STEPS
     steps = max(1, min(NUM_BASE_STEPS, steps))
+    # 既定CFG 3.0: 2.0より動作のテキスト追従が安定する (実測: 歩行速度の再現性向上)
+    cfg = 3.0 if cfg is None else max(1.0, min(6.0, float(cfg)))
     with GEN_LOCK, torch.no_grad():
         PROGRESS.update(active=True, stage="translate", started=time.time(), fraction=0.0, text=text)
         try:
@@ -364,10 +493,21 @@ def generate_spec(
                 seed_everything(int(seed))
             PROGRESS.update(stage="generate", started=time.time(), text=original or english)
             t_model = time.time()
-            motion = _generate_motion_streaming(segments, steps, observed, cmask, on_chunk)
+            # 複数セグメント (経由地なし) は独立生成+縫い合わせ:
+            # 履歴引き継ぎだと直前動作の慣性で新しい動作が発火しないことがあるため
+            use_stitch = len(segments) > 1 and not waypoints
+            if use_stitch:
+                local_np, root_np, fc_np = _generate_stitched(segments, steps, cfg)
+                output = {
+                    "local_rot_mats": torch.tensor(local_np, dtype=torch.float32, device=DEVICE)[None],
+                    "root_positions": torch.tensor(root_np, dtype=torch.float32, device=DEVICE)[None],
+                    "foot_contacts": torch.tensor(fc_np, device=DEVICE)[None],
+                }
+            else:
+                motion = _generate_motion_streaming(segments, steps, observed, cmask, on_chunk, cfg)
+                output = model.motion_rep.inverse(motion, is_normalized=True)
             t_inverse = time.time()
             PROGRESS["stage"] = "finalize"
-            output = model.motion_rep.inverse(motion, is_normalized=True)
             if postprocess:
                 corrected = post_process_motion(
                     output["local_rot_mats"],
@@ -376,6 +516,9 @@ def generate_spec(
                     model.skeleton,
                 )
                 output.update(corrected)
+            if "global_rot_mats" not in output:
+                glob, _, _ = fk(output["local_rot_mats"], output["root_positions"], model.skeleton)
+                output["global_rot_mats"] = glob
             t_done = time.time()
             print(
                 f"timing: generate={t_inverse-t_model:.1f}s finalize={t_done-t_inverse:.1f}s "
@@ -457,6 +600,7 @@ class Handler(BaseHTTPRequestHandler):
             spec = generate_spec(
                 text, duration, req.get("seed"), req.get("steps"), req.get("armSpread"),
                 segments_req, req.get("postprocess", True), req.get("waypoints"),
+                cfg=req.get("cfg"),
             )
             print(f"generated '{spec['name'][:50]}' ({spec['duration']}s) in {time.time()-t0:.1f}s", flush=True)
             self._send(200, spec)
