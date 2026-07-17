@@ -1,15 +1,13 @@
-# install.ps1 — ARDYローカルエンジンのセットアップスクリプト (Windows)
+﻿# install.ps1 — ARDYローカルエンジンのセットアップスクリプト (Windows)
 #
-# 実行例 (PowerShell):
-#   powershell -ExecutionPolicy Bypass -File tools\ardy-engine\install.ps1
+# アプリの「エンジンをセットアップ」ボタンから自動で起動されます。
+# 手動実行する場合: powershell -ExecutionPolicy Bypass -File install.ps1
 #
-# やること:
-#   1. Python 3.10+ / git / (NVIDIA GPUなら) CUDA対応PyTorch の確認とvenv作成
-#   2. C++ビルドツール (MinGW) をwingetで導入し、ARDY本体をビルドインストール
-#   3. ARDYモデル重みのダウンロード
-#   4. テキストエンコーダ (Llama-3-8B + LLM2Vec mntp) の構築
-#      - 既定: NousResearchミラー (Meta Llama 3 Community License の正規再配布) を使用
-#   5. アプリが自動起動に使う設定ファイル (ardy-engine.json) の書き出し
+# やること (全自動):
+#   1. Python 3.10+ / Git を確認。無ければ winget で自動インストール
+#   2. ARDY本体の取得とビルド (C++ビルドツールも自動導入)
+#   3. モデル重みのダウンロード (約20GB)
+#   4. アプリ用設定ファイルの書き出し
 #
 # 必要ディスク: 約35GB / 必要RAM: 16GB以上
 param(
@@ -19,10 +17,30 @@ param(
 $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-Write-Host "=== ARDY Local Engine Setup ===" -ForegroundColor Cyan
-Write-Host "install root: $EngineRoot"
+function Wait-Exit($code) {
+    Write-Host ""
+    Read-Host "Enterキーを押すとウィンドウを閉じます"
+    exit $code
+}
 
-# --- 1. 前提確認 ---
+try {
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host " Text-To-VRMA : ARDYエンジン セットアップ" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "インストール先: $EngineRoot"
+Write-Host "約20GBをダウンロードします。回線により30分〜1時間程度かかります。"
+Write-Host ""
+
+# --- 0. winget の確認 ---
+$hasWinget = [bool](Get-Command winget -ErrorAction SilentlyContinue)
+if (-not $hasWinget) {
+    Write-Host "winget が見つかりません。Windows 10 (更新済み) / 11 が必要です。" -ForegroundColor Yellow
+    Write-Host "Python 3.10以上と Git を手動でインストールしてから再実行してください:"
+    Write-Host "  https://www.python.org/downloads/  /  https://git-scm.com/"
+}
+
+# --- 1. Python ---
 $py = $null
 foreach ($cand in @('py -3.12', 'py -3.11', 'py -3.10', 'python')) {
     try {
@@ -30,28 +48,47 @@ foreach ($cand in @('py -3.12', 'py -3.11', 'py -3.10', 'python')) {
         if ($v -match 'Python 3\.(1[0-9])') { $py = $cand; break }
     } catch {}
 }
-if (-not $py) { throw "Python 3.10以上が見つかりません。https://www.python.org/ からインストールしてください。" }
-Write-Host "Python: $py"
+if (-not $py -and $hasWinget) {
+    Write-Host "[1/5] Python 3.12 をインストールしています..." -ForegroundColor Green
+    winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements --disable-interactivity | Out-Null
+    $pyExe = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
+    if (Test-Path $pyExe) { $py = "`"$pyExe`"" }
+}
+if (-not $py) { throw "Python 3.10以上をインストールできませんでした。https://www.python.org/ から手動でインストールして再実行してください。" }
+Write-Host "[1/5] Python: OK ($py)" -ForegroundColor Green
 
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "gitが見つかりません。" }
+# --- 2. Git ---
+$git = 'git'
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    if ($hasWinget) {
+        Write-Host "[2/5] Git をインストールしています..." -ForegroundColor Green
+        winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements --disable-interactivity | Out-Null
+    }
+    $gitExe = "$env:ProgramFiles\Git\cmd\git.exe"
+    if (Test-Path $gitExe) { $git = $gitExe }
+    elseif (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        throw "Git をインストールできませんでした。https://git-scm.com/ から手動でインストールして再実行してください。"
+    }
+}
+Write-Host "[2/5] Git: OK" -ForegroundColor Green
 
 $hasNvidia = $false
 try { $null = nvidia-smi 2>$null; $hasNvidia = ($LASTEXITCODE -eq 0) } catch {}
-Write-Host "NVIDIA GPU: $(if ($hasNvidia) {'あり (CUDA版PyTorchを使用)'} else {'なし (CPU版PyTorch、生成に数十秒/回)'})"
+Write-Host "NVIDIA GPU: $(if ($hasNvidia) {'あり (高速生成)'} else {'なし (CPU生成: 1回数十秒)'})"
 
-# --- 2. MinGW (C++ビルドツール) ---
+# --- 3. C++ビルドツール (MinGW) ---
 $mingwPkg = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe"
 $gxx = Get-ChildItem -Path $mingwPkg -Filter 'g++.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $gxx) {
-    Write-Host "MinGW GCC をインストールします (winget)..."
-    winget install BrechtSanders.WinLibs.POSIX.UCRT --accept-source-agreements --accept-package-agreements --disable-interactivity
+    Write-Host "[3/5] C++ビルドツールをインストールしています..." -ForegroundColor Green
+    winget install BrechtSanders.WinLibs.POSIX.UCRT --accept-source-agreements --accept-package-agreements --disable-interactivity | Out-Null
     $gxx = Get-ChildItem -Path $mingwPkg -Filter 'g++.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
 }
-if (-not $gxx) { throw "MinGWのインストールに失敗しました。" }
+if (-not $gxx) { throw "C++ビルドツール (MinGW) のインストールに失敗しました。" }
 $mingwBin = $gxx.DirectoryName
-Write-Host "MinGW: $mingwBin"
+Write-Host "[3/5] C++ビルドツール: OK" -ForegroundColor Green
 
-# --- 3. venv + ARDY本体 ---
+# --- 4. Python環境 + ARDY本体 + モデル ---
 New-Item -ItemType Directory -Force $EngineRoot | Out-Null
 $venvPy = Join-Path $EngineRoot 'venv\Scripts\python.exe'
 if (-not (Test-Path $venvPy)) {
@@ -59,7 +96,7 @@ if (-not (Test-Path $venvPy)) {
 }
 & $venvPy -m pip install --upgrade pip --quiet
 
-Write-Host "PyTorch をインストール中... (数GB)"
+Write-Host "[4/5] AIエンジンを構築しています... (数GBのダウンロード)" -ForegroundColor Green
 if ($hasNvidia) {
     & $venvPy -m pip install torch --index-url https://download.pytorch.org/whl/cu128
 } else {
@@ -68,22 +105,19 @@ if ($hasNvidia) {
 
 $ardyRepo = Join-Path $EngineRoot 'ardy'
 if (-not (Test-Path "$ardyRepo\setup.py")) {
-    git clone --depth 1 https://github.com/nv-tlabs/ardy.git $ardyRepo
+    & $git clone --depth 1 https://github.com/nv-tlabs/ardy.git $ardyRepo
 }
-Write-Host "ARDY をビルド中... (C++拡張のコンパイルを含む)"
 $env:PATH = "$mingwBin;$env:PATH"
 & $venvPy -m pip install cmake sentencepiece --quiet
 Push-Location $ardyRepo
 & $venvPy -m pip install -e .
 Pop-Location
 
-# --- 4. モデル重み ---
-Write-Host "ARDYモデル重みをダウンロード中..."
+Write-Host "[5/5] モデルをダウンロードしています... (約20GB。ここが一番時間がかかります)" -ForegroundColor Green
 & $venvPy -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='nvidia/ARDY-Core-RP-20FPS-Horizon40')"
 
 $mergedBase = Join-Path $EngineRoot 'llm2vec-base-merged'
 if (-not (Test-Path "$mergedBase\model.safetensors")) {
-    Write-Host "テキストエンコーダを構築中... (約16GBのダウンロード + マージ。時間がかかります)"
     & $venvPy (Join-Path $ScriptDir 'build_text_encoder.py') --out $mergedBase
 }
 
@@ -94,16 +128,27 @@ $config = @{
     port              = 2337
     textEncoderDevice = 'cpu'
 } | ConvertTo-Json
-# パッケージ版とdev版 (electron .) の両方のuserDataに書く
 foreach ($dir in @("$env:APPDATA\text-to-vrma", "$env:APPDATA\Electron")) {
     New-Item -ItemType Directory -Force $dir | Out-Null
     $config | Out-File -Encoding utf8 (Join-Path $dir 'ardy-engine.json')
 }
 
 Write-Host ""
-Write-Host "=== セットアップ完了 ===" -ForegroundColor Green
-Write-Host "アプリの「ARDYローカルエンジン」モードから「エンジンを起動」で使えます。"
-Write-Host "手動起動: `"$venvPy`" `"$ScriptDir\server.py`" --merged-base `"$mergedBase`""
+Write-Host "==========================================" -ForegroundColor Green
+Write-Host " セットアップ完了!" -ForegroundColor Green
+Write-Host "==========================================" -ForegroundColor Green
+Write-Host "アプリに戻り、「エンジンを起動」を押してください。"
 Write-Host ""
 Write-Host "本エンジンは Meta Llama 3 を利用しています (Built with Meta Llama 3)。"
 Write-Host "ライセンス: ARDY=NVIDIA Open Model / Llama-3-8B=Meta Llama 3 Community License / FuguMT=CC BY-SA 4.0"
+Wait-Exit 0
+
+} catch {
+    Write-Host ""
+    Write-Host "エラーが発生しました:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Write-Host "解決しない場合は GitHub の Issue でお知らせください:"
+    Write-Host "  https://github.com/Kirakun0328/text-to-vrma/issues"
+    Wait-Exit 1
+}

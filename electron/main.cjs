@@ -70,6 +70,7 @@ function registerArdyIpc() {
   ipcMain.handle('ardy:get-status', () => ardyClient.getStatus());
   ipcMain.handle('ardy:start', () => ardyClient.start());
   ipcMain.handle('ardy:stop', () => ardyClient.stop());
+  ipcMain.handle('ardy:setup', () => ardyClient.setup());
 }
 
 function createWindow() {

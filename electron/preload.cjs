@@ -17,4 +17,5 @@ contextBridge.exposeInMainWorld('ardyBridge', {
   getStatus: () => ipcRenderer.invoke('ardy:get-status'),
   start: () => ipcRenderer.invoke('ardy:start'),
   stop: () => ipcRenderer.invoke('ardy:stop'),
+  setup: () => ipcRenderer.invoke('ardy:setup'),
 });

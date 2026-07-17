@@ -135,12 +135,33 @@ async function checkArdyHealth() {
     ardyStartBtn.classList.add('hidden');
     return true;
   } catch {
-    const hint = window.ardyBridge
-      ? t('ardy.hintStartBtn')
-      : t('ardy.hintManual');
-    setArdyState(t('ardy.notRunning', { hint }), 'err');
-    ardyStartBtn.classList.toggle('hidden', !window.ardyBridge);
+    if (window.ardyBridge) {
+      // 未セットアップならボタンを「セットアップ」に切り替える (JSONを触らせない)
+      const st = await window.ardyBridge.getStatus().catch(() => null);
+      const configured = Boolean(st?.configured);
+      ardyStartBtn.textContent = configured ? t('btn.engineStart') : t('btn.engineSetup');
+      ardyStartBtn.dataset.mode = configured ? 'start' : 'setup';
+      ardyStartBtn.classList.remove('hidden');
+      setArdyState(
+        configured ? t('ardy.notRunning', { hint: t('ardy.hintStartBtn') }) : t('ardy.notInstalled'),
+        'err'
+      );
+    } else {
+      setArdyState(t('ardy.notRunning', { hint: t('ardy.hintManual') }), 'err');
+      ardyStartBtn.classList.add('hidden');
+    }
     return false;
+  }
+}
+
+// エンジンのセットアップ (install.ps1 を可視ウィンドウで実行)
+async function setupArdyEngine() {
+  if (!window.confirm(t('ardy.setupConfirm'))) return;
+  try {
+    await window.ardyBridge.setup();
+    setArdyState(t('ardy.setupStarted'), 'ok');
+  } catch (e) {
+    setArdyState(`❌ ${e.message}`, 'err');
   }
 }
 
@@ -260,7 +281,14 @@ async function generateMotionWithArdy(text, { onProgress } = {}) {
 async function startArdyEngine() {
   if (!window.ardyBridge) return;
   try {
-    const status = await window.ardyBridge.start();
+    const status = await window.ardyBridge.start().catch((e) => {
+      if (String(e?.message).includes('ARDY_NOT_CONFIGURED')) {
+        setupArdyEngine();
+        return null;
+      }
+      throw e;
+    });
+    if (!status) return;
     if (!status.running) throw new Error(status.lastError || t('err.engineStart'));
     setArdyState(t('ardy.starting'));
     for (let i = 0; i < 90; i++) {
@@ -747,6 +775,10 @@ waypointClearBtn.addEventListener('click', () => {
   setStatus(t('wp.cleared'), 'ok');
 });
 ardyStartBtn.addEventListener('click', () => {
+  if (ardyStartBtn.dataset.mode === 'setup') {
+    setupArdyEngine();
+    return;
+  }
   ardyStartBtn.disabled = true;
   startArdyEngine().finally(() => { ardyStartBtn.disabled = false; });
 });
