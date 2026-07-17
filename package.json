@@ -28,10 +28,8 @@
     },
     "win": {
       "target": [
-        "portable",
-        "zip"
-      ],
-      "artifactName": "Text-To-VRMA_v${version}.${ext}"
+        "portable"
+      ]
     },
     "portable": {
       "artifactName": "Text-To-VRMA-v${version}.exe"
