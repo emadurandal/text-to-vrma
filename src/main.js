@@ -11,6 +11,7 @@ import {
   generateMotionWithOpenAI,
   generateMotionWithCodex,
   planArdySegments,
+  setApiBase,
   DEFAULT_OPENAI_MODEL,
 } from './llm.js';
 
@@ -31,6 +32,8 @@ function setExportEnabled(on) {
   webmBtn.disabled = !on;
 }
 const apiKeyInput = $('apiKey');
+const apiBaseUrlInput = $('apiBaseUrl');
+const apiCustomModelInput = $('apiCustomModel');
 const authModeSelect = $('authMode');
 const apiSettings = $('apiSettings');
 const codexSettings = $('codexSettings');
@@ -46,6 +49,7 @@ const ardyUrlInput = $('ardyUrl');
 const ardyStartBtn = $('ardyStartBtn');
 const ardySetupBtn = $('ardySetupBtn');
 const ardyDurationInput = $('ardyDuration');
+const autoLengthCheck = $('autoLengthCheck');
 const genProgress = $('genProgress');
 const genProgressBar = $('genProgressBar');
 const genProgressText = $('genProgressText');
@@ -62,6 +66,22 @@ langSelect.addEventListener('change', () => {
   updateWaypointUI();
 });
 applyStaticI18n();
+
+// specを目標秒数へ時間リスケールする (全キーフレームの時刻を比例変換)。
+// LLMキーフレーム生成で「長さ(秒)」指定を確実に反映するために使う
+function rescaleSpec(spec, target) {
+  const cur = Number(spec?.duration) || 0;
+  if (!cur || !target || Math.abs(cur - target) < 0.02) {
+    if (spec) spec.duration = target || cur;
+    return spec;
+  }
+  const f = target / cur;
+  for (const keys of Object.values(spec.tracks || {})) for (const k of keys) k.t *= f;
+  for (const k of spec.hips || []) k.t *= f;
+  for (const keys of Object.values(spec.expressions || {})) for (const k of keys) k.t *= f;
+  spec.duration = target;
+  return spec;
+}
 
 // その場の動き (移動が少なく、終了時に開始位置付近へ戻る) ならループ向きと判定する
 function isLoopFriendly(spec) {
@@ -333,9 +353,11 @@ async function generateMotionWithArdy(text, { onProgress } = {}) {
     : { text };
   if (waypointsActive) body.waypoints = waypoints.map((w) => ({ x: w.x, z: w.z }));
 
-  // 長さの手動指定 (空欄なら自動判定)。指定時は全体をその秒数に合わせる
+  // 長さの手動指定。「自動補正」ONのときは秒数を固定せず、ARDYに自然な長さで
+  // 生成させる (動作の数に見合った長さになり、詰め込みすぎを防ぐ)
   const manualDur = parseFloat(ardyDurationInput.value);
-  if (Number.isFinite(manualDur) && manualDur > 0) {
+  const forceDur = Number.isFinite(manualDur) && manualDur > 0 && !autoLengthCheck.checked;
+  if (forceDur) {
     body.duration = manualDur;
     if (body.segments?.length) {
       // 複数セグメントは、GPTが割り振った比率を保ったまま合計が指定秒数になるよう按分
@@ -353,6 +375,9 @@ async function generateMotionWithArdy(text, { onProgress } = {}) {
   spec.loop = isLoopFriendly(spec);
   // 非ループは最後に自然な直立姿勢へ戻して終わる (中途半端なポーズで固まらない)
   if (!spec.loop) appendNeutralEnding(spec);
+  // 秒数を固定する場合のみ、終わり処理を含めた全体を指定秒数ちょうどへ補正する
+  // (「自動補正」ONのときは固定せず、動きが自然に収まる長さのままにする)
+  if (forceDur) rescaleSpec(spec, manualDur);
   // ARDYは表情を生成しないので自動付与する (GPTの感情判定があれば優先、
   // なければ原文の感情語からのキーワードマッチ)
   spec.expressions = autoExpressions(spec.originalText ?? text, spec.duration, plan?.expression);
@@ -683,13 +708,16 @@ generateBtn.addEventListener('click', async () => {
       setStatus(t('ardy.generating'));
       spec = await generateMotionWithArdy(text, options);
     } else {
-      const model = authMode === 'codex' ? codexModelSelect.value : apiModelSelect.value;
+      // api-keyモードはカスタムモデル入力があればそれを優先 (OpenAI互換プロバイダ対応)
+      const customModel = apiCustomModelInput.value.trim();
+      const model = authMode === 'codex'
+        ? codexModelSelect.value
+        : (customModel || apiModelSelect.value);
       if (!model) throw new Error(t('err.noModel'));
       if (authMode === 'api-key') {
         localStorage.setItem('openai-api-key', apiKey);
         localStorage.setItem('openai-model', model);
-      } else {
-        localStorage.setItem('codex-model', model);
+        setApiBase(apiBaseUrlInput.value); // カスタムベースURL (空欄なら公式)
       }
       localStorage.setItem('refine-enabled', refineCheck.checked ? '1' : '0');
       setStatus(t('gen.llm', { engine: authMode === 'codex' ? 'Codex' : 'OpenAI', model }));
@@ -705,6 +733,12 @@ generateBtn.addEventListener('click', async () => {
         } finally {
           progress.done();
         }
+      }
+      // 長さ指定を全エンジンで有効に: LLMキーフレームは生成後に目標秒数へリスケール
+      // (「自動補正」ONのときは固定しない)
+      const manualDur = parseFloat(ardyDurationInput.value);
+      if (Number.isFinite(manualDur) && manualDur > 0 && !autoLengthCheck.checked) {
+        rescaleSpec(spec, manualDur);
       }
     }
     // ループ再生: ユーザー指定 (常に/1回) は全エンジン共通で上書き。
@@ -926,7 +960,21 @@ viewerWrap.addEventListener('drop', (e) => {
 
 // --- 設定復元 / Ctrl+Enterで生成 ---
 apiKeyInput.value = localStorage.getItem('openai-api-key') ?? '';
+apiBaseUrlInput.value = localStorage.getItem('openai-base-url') ?? '';
+apiCustomModelInput.value = localStorage.getItem('openai-custom-model') ?? '';
+apiBaseUrlInput.addEventListener('change', () => {
+  localStorage.setItem('openai-base-url', apiBaseUrlInput.value.trim());
+  setApiBase(apiBaseUrlInput.value);
+});
+apiCustomModelInput.addEventListener('change', () => {
+  localStorage.setItem('openai-custom-model', apiCustomModelInput.value.trim());
+});
+setApiBase(apiBaseUrlInput.value); // 起動時に保存済みのベースURLを反映
 refineCheck.checked = localStorage.getItem('refine-enabled') !== '0';
+autoLengthCheck.checked = localStorage.getItem('auto-length') === '1';
+autoLengthCheck.addEventListener('change', () => {
+  localStorage.setItem('auto-length', autoLengthCheck.checked ? '1' : '0');
+});
 exprCheck.checked = localStorage.getItem('export-expressions') !== '0';
 loopSelect.value = 'auto'; // ループ再生は毎回「自動」で開始 (記憶しない)
 

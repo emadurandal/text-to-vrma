@@ -230,8 +230,16 @@ function applyWaveCorrection(spec) {
   }
 }
 
+// OpenAI互換プロバイダ対応: ベースURLを差し替え可能にする (OpenRouter / DeepSeek / Ollama 等)
+const DEFAULT_API_BASE = 'https://api.openai.com/v1';
+let API_BASE = DEFAULT_API_BASE;
+export function setApiBase(url) {
+  const u = (url || '').trim().replace(/\/+$/, '');
+  API_BASE = u || DEFAULT_API_BASE;
+}
+
 async function callOpenAI(messages, apiKey, model, onDelta) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

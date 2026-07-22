@@ -286,6 +286,14 @@
             <option value="gpt-5.6-terra" data-i18n="model.balanced">gpt-5.6-terra (バランス)</option>
             <option value="gpt-5.6-luna" data-i18n="model.low">gpt-5.6-luna (低コスト)</option>
           </select>
+          <details class="ardy-fold">
+            <summary data-i18n="api.customHead">🔌 OpenAI互換プロバイダを使う (任意)</summary>
+            <p class="sub" style="margin:6px 0" data-i18n="api.customNote">OpenRouter / DeepSeek / Ollama 等のOpenAI互換APIを使う場合に設定します。空欄なら公式OpenAIを使います。</p>
+            <label class="field-label" data-i18n="api.baseUrl">APIベースURL</label>
+            <input type="text" id="apiBaseUrl" placeholder="https://api.openai.com/v1" />
+            <label class="field-label" style="margin-top:6px" data-i18n="api.customModel">モデル名 (カスタム)</label>
+            <input type="text" id="apiCustomModel" placeholder="例: deepseek-chat / meta-llama/llama-3.1-8b-instruct" data-i18n-placeholder="api.customModelPh" />
+          </details>
         </div>
         <div id="codexSettings" class="auth-box hidden">
           <div id="codexAuthState" class="auth-state" data-i18n="codex.checking">Codex CLIを確認中...</div>
@@ -304,10 +312,6 @@
           <div class="auth-actions">
             <button id="ardyStartBtn" class="btn-blue hidden" data-i18n="btn.engineStart">エンジンを起動</button>
             <button id="ardySetupBtn" class="btn-soft hidden" data-i18n="btn.engineSetup">⬇ エンジンをセットアップ (初回のみ)</button>
-          </div>
-          <div class="inline" title="生成するモーションの長さ (秒)。空欄なら内容から自動判定します。" data-i18n-title="ardy.durTitle">
-            <span data-i18n="ardy.durLabel">⏱ 長さ (秒)</span>
-            <input type="number" id="ardyDuration" min="0.1" step="0.1" placeholder="自動" data-i18n-placeholder="ardy.durAuto" />
           </div>
           <details class="ardy-fold">
             <summary class="section-sub" data-i18n="ardy.gptHead">🧠 GPT (頭) — 任意 (精度アップ)</summary>
@@ -335,6 +339,14 @@
           </label>
           <button id="waypointClearBtn" class="btn-soft hidden" style="margin-top:8px;width:100%" data-i18n="wp.clear">経由地をクリア</button>
         </div>
+        <div class="inline" title="生成するモーションの長さ (秒)。空欄なら内容から自動判定します (全エンジン共通)。" data-i18n-title="ardy.durTitle">
+          <span data-i18n="ardy.durLabel">⏱ 長さ (秒)</span>
+          <input type="number" id="ardyDuration" min="0.1" step="0.1" placeholder="自動" data-i18n-placeholder="ardy.durAuto" />
+        </div>
+        <label class="check" title="ONにすると、指定秒数どおりに固定せず、動きが自然に収まる長さへ自動で調整します (指定より長くなる場合あり)。" data-i18n-title="ardy.durAutoFitTitle">
+          <input type="checkbox" id="autoLengthCheck" /> <span data-i18n="ardy.durAutoFit">長さを自動補正 (指定より長くなる場合あり)</span>
+        </label>
+        <p class="sub" data-i18n="ardy.durHint">※ 短い秒数に多くの動作を詰めると、動きが速すぎたり不自然になることがあります。その場合は秒数を増やすか「自動補正」をONにしてください。</p>
         <label class="inline" title="生成したモーションを繰り返し再生するか。" data-i18n-title="loop.title">
           <span data-i18n="loop.label">ループ再生:</span>
           <select id="loopSelect" style="flex:1">
